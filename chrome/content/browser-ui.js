@@ -43,6 +43,7 @@ const PANELMODE_VIEW              = 1;
 const PANELMODE_EDIT              = 2;
 const PANELMODE_BOOKMARK          = 3;
 const PANELMODE_BOOKMARKLIST      = 4;
+const PANELMODE_SHORTCUTLIST      = 5;
 
 var BrowserUI = {
   _panel : null,
@@ -443,6 +444,7 @@ var BrowserUI = {
       case "cmd_go":
       case "cmd_star":
       case "cmd_bookmarks":
+      case "cmd_shortcuts":
         isSupported = true;
         break;
       default:
@@ -458,7 +460,6 @@ var BrowserUI = {
 
   doCommand : function(cmd) {
     var browser = getBrowser();
-
     switch (cmd) {
       case "cmd_back":
         browser.goBack();
@@ -504,6 +505,10 @@ var BrowserUI = {
       case "cmd_bookmarks":
          this._showMode(PANELMODE_BOOKMARKLIST);
         this.showBookmarks();
+        break;
+      case "cmd_shortcuts":
+        this._showMode(PANELMODE_SHORTCUTLIST);
+        Shortcuts.edit();
         break;
     }
   }

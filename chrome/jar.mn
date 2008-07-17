@@ -11,6 +11,7 @@ browser.jar:
   content/browser.css                  (content/browser.css)
   content/scrollbars.css               (content/scrollbars.css)
   content/content.css                  (content/content.css)
+* content/shortcuts.js
 % content branding %branding/
 % locale branding @AB_CD@ %branding/
   branding/brand.dtd                   (locale/@AB_CD@/brand/brand.dtd)
@@ -36,5 +37,6 @@ classic.jar:
 % locale browser @AB_CD@ %
   browser.dtd                          (locale/@AB_CD@/browser.dtd)
   browser.properties                   (locale/@AB_CD@/browser.properties)
+  shortcuts.properties                 (locale/@AB_CD@/shortcuts.properties)
   search.properties                    (locale/@AB_CD@/search.properties)
   region.properties                    (locale/@AB_CD@/region.properties)
