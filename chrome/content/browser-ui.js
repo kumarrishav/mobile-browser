@@ -149,6 +149,10 @@ var BrowserUI = {
 
     getBrowser().addEventListener("DOMTitleChanged", this, true);
     getBrowser().addEventListener("DOMLinkAdded", this, true);
+
+    Shortcuts.restore();
+    Shortcuts.test();
+
     Browser.content.addEventListener("overpan", this, false);
     Browser.content.addEventListener("pan", this, true);
   },
@@ -504,6 +508,7 @@ var BrowserUI = {
       case "cmd_go":
       case "cmd_star":
       case "cmd_bookmarks":
+      case "cmd_shortcuts":
       case "cmd_menu":
       case "cmd_newTab":
       case "cmd_closeTab":
@@ -522,7 +527,6 @@ var BrowserUI = {
 
   doCommand : function(cmd) {
     var browser = getBrowser();
-
     switch (cmd) {
       case "cmd_back":
         browser.goBack();
@@ -569,6 +573,10 @@ var BrowserUI = {
       }
       case "cmd_bookmarks":
         this.showBookmarks();
+        break;
+      case "cmd_shortcuts":
+        this._showMode(PANELMODE_SHORTCUTLIST);
+        Shortcuts.edit();
         break;
       case "cmd_menu":
         if (this.mode == PANELMODE_FULL)
