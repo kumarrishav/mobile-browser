@@ -1,3 +1,4 @@
+// -*- Mode: js2; tab-width: 2; indent-tabs-mode: nil; js2-basic-offset: 2; js2-skip-preprocessor-directives: t; -*-
 /* ***** BEGIN LICENSE BLOCK *****
  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
  *
@@ -796,6 +797,7 @@ var BrowserUI = {
       case "cmd_closeTab":
       case "cmd_actions":
       case "cmd_panel":
+      case "cmd_sanitize":
         isSupported = true;
         break;
       default:
@@ -867,7 +869,8 @@ var BrowserUI = {
       case "cmd_closeTab":
         Browser.content.removeTab(Browser.content.browser);
         break;
-      case "cmd_actions":
+      case "cmd_sanitize":
+        Sanitizer.sanitize();
         break;
       case "cmd_panel":
       {

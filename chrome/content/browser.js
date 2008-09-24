@@ -1,4 +1,5 @@
-/* -*- Mode: javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+// -*- Mode: js2; tab-width: 2; indent-tabs-mode: nil; js2-basic-offset: 2; js2-skip-preprocessor-directives: t; -*-
+/*
  * ***** BEGIN LICENSE BLOCK *****
  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
  *
@@ -147,14 +148,16 @@ var Browser = {
         var self = this;
         setTimeout(function() { self.currentBrowser.loadURI(whereURI, null, null, false); }, 0);
       }
-
-      // Disable plugins
-      var phs = Cc["@mozilla.org/plugin/host;1"].
-                getService(Ci.nsIPluginHost);
-      var plugins = phs.getPluginTags({ });
-      for (i = 0; i < plugins.length; ++i)
-        plugins[i].disabled = true;
     }
+  },
+
+  setPluginState: function(state)
+  {
+    var phs = Components.classes["@mozilla.org/plugin/host;1"]
+                        .getService(Components.interfaces.nsIPluginHost);
+    var plugins = phs.getPluginTags({ });
+     for (i = 0; i < plugins.length; ++i)
+       plugins[i].disabled = state;
   },
 
   setupGeolocationPrompt: function() {
