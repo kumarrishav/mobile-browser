@@ -6,6 +6,6 @@ case "$target" in
     MOZ_APP_VERSION=1.0a4pre
     ;;
 *)
-    MOZ_APP_VERSION=1.1a1
+    MOZ_APP_VERSION=1.0.0
     ;;
 esac
