@@ -407,10 +407,11 @@ pref("browser.search.param.yahoo-fr-ja", "mozff");
 #endif
 
 /* app update prefs */
+pref("app.update.timer", 60000); // milliseconds (1 min)
+
 #ifdef MOZ_UPDATER
 pref("app.update.auto", true);
 pref("app.update.channel", "@MOZ_UPDATE_CHANNEL@");
-pref("app.update.timer", 600000);
 pref("app.update.mode", 1);
 pref("app.update.silent", false);
 pref("app.update.url", "https://aus2.mozilla.org/update/3/%APP_ID%/%VERSION%/%GRE_MILESTONE%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
