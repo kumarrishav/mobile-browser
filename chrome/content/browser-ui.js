@@ -927,24 +927,15 @@ var PageActions = {
         false);
     }
 
-    let siteLogins = [];
-    let allLogins = lm.findLogins({}, host.prePath, "", null);
-    for (let i = 0; i < allLogins.length; i++) {
-      let login = allLogins[i];
-      if (login.hostname != host.prePath)
-        continue;
-
-      siteLogins.push(login);
-    }
-
     // Show only 1 password button for all the saved logins
+    let siteLogins = lm.findLogins({}, host.prePath, "", null);
     if (siteLogins.length) {
       let title = Elements.browserBundle.getString("pageactions.password.forget");
       let node = this.appendItem("preferences", title, "");
       node.addEventListener("click", function(event) {
           for (let i = 0; i < siteLogins.length; i++)
             lm.removeLogin(siteLogins[i]);
-  
+
           PageActions.removeItem(node);
         },
         false);
