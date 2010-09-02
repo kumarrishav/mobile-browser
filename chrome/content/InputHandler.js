@@ -234,8 +234,8 @@ InputHandler.prototype = {
     if (this._ignoreEvents)
       return;
 
-    /* ignore all events that belong to other windows or documents (e.g. content events) */
-    if (aEvent.view != window)
+    // ignore all events that belong to other windows or documents (e.g. content events)
+    if (aEvent.target.localName == "browser")
       return;
 
     if (this._suppressNextClick && aEvent.type == "click") {
@@ -427,25 +427,24 @@ MouseModule.prototype = {
 
     // walk up the DOM tree in search of nearest scrollable ancestor.  nulls are
     // returned if none found.
-    let [targetScrollbox, targetScrollInterface]
+    let [targetScrollbox, targetScrollInterface, dragger]
       = this.getScrollboxFromElement(aEvent.target);
 
     // stop kinetic panning if targetScrollbox has changed
-    let oldInterface = this._targetScrollInterface;
-    if (this._kinetic.isActive() && targetScrollInterface != oldInterface)
+    let oldDragger = this._dragger;
+    if (this._kinetic.isActive() && this._dragger != dragger)
       this._kinetic.end();
 
     let targetClicker = this.getClickerFromElement(aEvent.target);
 
     this._targetScrollInterface = targetScrollInterface;
-    this._dragger = (targetScrollInterface) ? (targetScrollbox.customDragger || this._defaultDragger)
-                                            : null;
+    this._dragger = dragger;
     this._clicker = (targetClicker) ? targetClicker.customClicker : null;
 
     if (this._clicker)
       this._clicker.mouseDown(aEvent.clientX, aEvent.clientY);
 
-    if (targetScrollInterface && this._dragger.isDraggable(targetScrollbox, targetScrollInterface))
+    if (this._dragger && this._dragger.isDraggable(targetScrollbox, targetScrollInterface))
       this._doDragStart(aEvent);
 
     if (this._targetIsContent(aEvent)) {
@@ -458,12 +457,10 @@ MouseModule.prototype = {
         this._cleanClickBuffer();
       }
 
-      if (targetScrollInterface) {
+      if (this._dragger) {
         // do not allow axis locking if panning is only possible in one direction
-        let cX = {}, cY = {};
-        targetScrollInterface.getScrolledSize(cX, cY);
-        let rect = targetScrollbox.getBoundingClientRect();
-        dragData.locked = ((cX.value > rect.width) != (cY.value > rect.height));
+        let draggable = this._dragger.isDraggable(targetScrollbox, targetScrollInterface);
+        dragData.locked = !draggable.x || !draggable.y;
       }
     }
   },
@@ -549,15 +546,7 @@ MouseModule.prototype = {
    */
   _targetIsContent: function _targetIsContent(aEvent) {
     let target = aEvent.target;
-    while (target) {
-      if (target === window)
-        return false;
-      if (target === this._browserViewContainer)
-        return true;
-
-      target = target.parentNode;
-    }
-    return false;
+    return target && target.id == "inputhandler-overlay";
   },
 
   /**
@@ -711,7 +700,7 @@ MouseModule.prototype = {
       let sX = {}, sY = {};
       scroller.getScrolledSize(sX, sY);
       let rect = target.getBoundingClientRect();
-      return sX.value > rect.width || sY.value > rect.height;
+      return { x: sX.value > rect.width, y: sY.value > rect.height };
     },
 
     dragStart: function dragStart(cx, cy, target, scroller) {},
@@ -755,12 +744,10 @@ MouseModule.prototype = {
   getScrollboxFromElement: function getScrollboxFromElement(elem) {
     let scrollbox = null;
     let qinterface = null;
-    let prev = null;
 
     for (; elem; elem = elem.parentNode) {
       try {
         if (elem.ignoreDrag) {
-          prev = elem;
           break;
         }
 
@@ -776,13 +763,15 @@ MouseModule.prototype = {
             scrollbox._cachedSBO = qinterface = qi;
             break;
           }
+        } else if (elem.customDragger) {
+          scrollbox = elem;
+          break;
         }
       } catch (e) { /* we aren't here to deal with your exceptions, we'll just keep
                        traversing until we find something more well-behaved, as we
                        prefer default behaviour to whiny scrollers. */ }
-      prev = elem;
     }
-    return [scrollbox, qinterface, prev];
+    return [scrollbox, qinterface, (scrollbox ? (scrollbox.customDragger || this._defaultDragger) : null)];
   },
 
   /**

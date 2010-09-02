@@ -1037,7 +1037,8 @@ var TapHighlightHelper = {
   },
 
   show: function show(aRects) {
-    let bv = Browser._browserView;
+    return;
+
     let union = aRects.reduce(function(a, b) {
       return a.expandToContain(b);
     }, new Rect(0, 0, 0, 0)).map(bv.browserToViewport);
@@ -1529,7 +1530,6 @@ var FindHelperUI = {
 
   show: function findHelperShow() {
     BrowserUI.pushPopup(this, this._container);
-    Browser._browserView.ignorePageScroll(true);
     this._container.show(this);
     this.search("");
     this._textbox.focus();
@@ -1537,7 +1537,6 @@ var FindHelperUI = {
 
   hide: function findHelperHide() {
     BrowserUI.popPopup();
-    Browser._browserView.ignorePageScroll(false);
     this._textbox.value = "";
     this._container.hide(this);
   },
@@ -1561,7 +1560,8 @@ var FindHelperUI = {
   },
 
   _zoom: function _findHelperZoom(aElementRect) {
-    let bv = Browser._browserView;
+    return;
+
     let zoomRect = bv.getVisibleRect();
 
     // Zoom to a specified Rect
@@ -1751,8 +1751,6 @@ var FormHelperUI = {
     if (aVal == this._open)
       return;
 
-    let bv = Browser._browserView;
-    bv.ignorePageScroll(aVal);
     this._container.hidden = !aVal;
     this._container.contentHasChanged();
 
@@ -1838,6 +1836,8 @@ var FormHelperUI = {
 
   /** Zoom and move viewport so that element is legible and touchable. */
   _zoom: function _formHelperZoom(aElementRect, aCaretRect) {
+    return;
+
     let bv = Browser._browserView;
 
     if (aElementRect && aCaretRect && this._open) {
