@@ -84,8 +84,6 @@
   <script type="application/javascript" src="chrome://browser/content/console.js"/>
   <script type="application/javascript" src="chrome://browser/content/Util.js"/>
   <script type="application/javascript" src="chrome://browser/content/InputHandler.js"/>
-  <script type="application/javascript" src="chrome://browser/content/TileManager.js"/>
-  <script type="application/javascript" src="chrome://browser/content/BrowserView.js"/>
   <script type="application/javascript" src="chrome://browser/content/AnimatedZoom.js"/>
 #ifdef MOZ_SERVICES_SYNC
   <script type="application/javascript" src="chrome://browser/content/sync.js"/>
@@ -273,15 +271,12 @@
             <!-- Content viewport -->
             <vbox class="window-width window-height">
               <stack id="tile-stack" class="window-width" flex="1">
-                <scrollbox id="content-scrollbox" style="overflow: hidden;" class="window-width" flex="1">
-                  <!-- Content viewport -->
-                  <html:div id="tile-container" style="overflow: hidden;" tabindex="-1">
-                    <html:canvas id="content-overlay" style="display: none; position: absolute; z-index: 1000; left: 0; top: 0;">
-                    </html:canvas>
-                  </html:div>
-                </scrollbox>
-                <html:canvas id="view-buffer" style="display: none;" moz-opaque="true">
-                </html:canvas>
+              <!-- Content viewport -->
+                <html:div>
+                  <html:div id="browsers"/>
+                  <html:canvas id="content-overlay" style="display: none; position: absolute; z-index: 1000; left: 0; top: 0;"/>
+                </html:div>
+                <html:div id="inputhandler-overlay" style="z-index: 1001" tabindex="-1"/>
               </stack>
               <box id="content-navigator-spacer" hidden="true"/>
             </vbox>
@@ -588,7 +583,6 @@
 
   <box>
     <html:div style="position: relative; overflow: -moz-hidden-unscrollable; max-width: 0px; max-height: 0px; visibility: hidden;">
-      <html:div id="browsers" style="position: absolute;"/>
     </html:div>
   </box>
 
