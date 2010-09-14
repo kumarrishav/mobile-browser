@@ -235,8 +235,8 @@ InputHandler.prototype = {
     if (this._ignoreEvents)
       return;
 
-    /* ignore all events that belong to other windows or documents (e.g. content events) */
-    if (aEvent.view != window)
+    // ignore all events that belong to other windows or documents (e.g. content events)
+    if (aEvent.target.localName == "browser")
       return;
 
     if (this._suppressNextClick && aEvent.type == "click") {
@@ -428,25 +428,24 @@ MouseModule.prototype = {
 
     // walk up the DOM tree in search of nearest scrollable ancestor.  nulls are
     // returned if none found.
-    let [targetScrollbox, targetScrollInterface]
+    let [targetScrollbox, targetScrollInterface, dragger]
       = this.getScrollboxFromElement(aEvent.target);
 
     // stop kinetic panning if targetScrollbox has changed
-    let oldInterface = this._targetScrollInterface;
-    if (this._kinetic.isActive() && targetScrollInterface != oldInterface)
+    let oldDragger = this._dragger;
+    if (this._kinetic.isActive() && this._dragger != dragger)
       this._kinetic.end();
 
     let targetClicker = this.getClickerFromElement(aEvent.target);
 
     this._targetScrollInterface = targetScrollInterface;
-    this._dragger = (targetScrollInterface) ? (targetScrollbox.customDragger || this._defaultDragger)
-                                            : null;
+    this._dragger = dragger;
     this._clicker = (targetClicker) ? targetClicker.customClicker : null;
 
     if (this._clicker)
       this._clicker.mouseDown(aEvent.clientX, aEvent.clientY);
 
-    if (targetScrollInterface && this._dragger.isDraggable(targetScrollbox, targetScrollInterface))
+    if (this._dragger && this._dragger.isDraggable(targetScrollbox, targetScrollInterface))
       this._doDragStart(aEvent);
 
     if (this._targetIsContent(aEvent)) {
@@ -459,12 +458,10 @@ MouseModule.prototype = {
         this._cleanClickBuffer();
       }
 
-      if (targetScrollInterface) {
+      if (this._dragger) {
         // do not allow axis locking if panning is only possible in one direction
-        let cX = {}, cY = {};
-        targetScrollInterface.getScrolledSize(cX, cY);
-        let rect = targetScrollbox.getBoundingClientRect();
-        dragData.locked = ((cX.value > rect.width) != (cY.value > rect.height));
+        let draggable = this._dragger.isDraggable(targetScrollbox, targetScrollInterface);
+        dragData.locked = !draggable.x || !draggable.y;
       }
     }
   },
@@ -550,15 +547,7 @@ MouseModule.prototype = {
    */
   _targetIsContent: function _targetIsContent(aEvent) {
     let target = aEvent.target;
-    while (target) {
-      if (target === window)
-        return false;
-      if (target === this._browserViewContainer)
-        return true;
-
-      target = target.parentNode;
-    }
-    return false;
+    return target && target.id == "inputhandler-overlay";
   },
 
   /**
@@ -712,7 +701,7 @@ MouseModule.prototype = {
       let sX = {}, sY = {};
       scroller.getScrolledSize(sX, sY);
       let rect = target.getBoundingClientRect();
-      return sX.value > rect.width || sY.value > rect.height;
+      return { x: sX.value > rect.width, y: sY.value > rect.height };
     },
 
     dragStart: function dragStart(cx, cy, target, scroller) {},
@@ -756,12 +745,10 @@ MouseModule.prototype = {
   getScrollboxFromElement: function getScrollboxFromElement(elem) {
     let scrollbox = null;
     let qinterface = null;
-    let prev = null;
 
     for (; elem; elem = elem.parentNode) {
       try {
         if (elem.ignoreDrag) {
-          prev = elem;
           break;
         }
 
@@ -777,13 +764,15 @@ MouseModule.prototype = {
             scrollbox._cachedSBO = qinterface = qi;
             break;
           }
+        } else if (elem.customDragger) {
+          scrollbox = elem;
+          break;
         }
       } catch (e) { /* we aren't here to deal with your exceptions, we'll just keep
                        traversing until we find something more well-behaved, as we
                        prefer default behaviour to whiny scrollers. */ }
-      prev = elem;
     }
-    return [scrollbox, qinterface, prev];
+    return [scrollbox, qinterface, (scrollbox ? (scrollbox.customDragger || this._defaultDragger) : null)];
   },
 
   /**
@@ -1304,23 +1293,22 @@ GestureModule.prototype = {
   },
 
   _pinchStart: function _pinchStart(aEvent) {
-    let bv = Browser._browserView;
     // start gesture if it's not taking place already, or over a XUL element
-    if (this._pinchZoom || (aEvent.target instanceof XULElement) || !bv.allowZoom)
+    if (this._pinchZoom || (aEvent.target instanceof XULElement) || !Browser.selectedTab.allowZoom)
       return;
 
     // grab events during pinch
     this._owner.grab(this);
 
     // hide element highlight
-    document.getElementById("tile-container").customClicker.panBegin();
+    // XXX ugh, this is awful. None of this code should be in InputHandler.
+    document.getElementById("inputhandler-overlay").customClicker.panBegin();
 
     // create the AnimatedZoom object for fast arbitrary zooming
-    this._pinchZoom = new AnimatedZoom(bv);
+    this._pinchZoom = animatedZoom;
 
     // start from current zoom level
-    this._pinchZoomLevel = bv.getZoomLevel();
-    this._pinchDelta = 0;
+    this._pinchZoomLevel = getBrowser().scale;
     this._ignoreNextUpdate = true; // first update gives useless, huge delta
 
     // cache gesture limit values
@@ -1331,28 +1319,40 @@ GestureModule.prototype = {
     // save the initial gesture start point as reference
     [this._pinchStartX, this._pinchStartY] =
         Browser.transformClientToBrowser(aEvent.clientX, aEvent.clientY);
+
+    let scrollX = {}, scrollY = {};
+    getBrowser().getPosition(scrollX, scrollY);
+    this._pinchScrollX = scrollX.value;
+    this._pinchScrollY = scrollY.value;
+
+    let [centerX, centerY] = Browser.transformClientToBrowser(window.innerWidth / 2,
+                                                              window.innerHeight / 2);
+    this._centerX = centerX;
+    this._centerY = centerY;
   },
 
   _pinchUpdate: function _pinchUpdate(aEvent) {
     if (!this._pinchZoom || !aEvent.delta)
       return;
 
-    // Accumulate pinch delta. Changes smaller than 1 are just jitter.
-    this._pinchDelta += aEvent.delta;
-
     // decrease the pinchDelta min/max values to limit zooming out/in speed
-    let delta = Math.max(-this._maxShrink, Math.min(this._maxGrowth, this._pinchDelta));
+    let delta = Util.clamp(aEvent.delta, -this._maxShrink, this._maxGrowth);
     this._pinchZoomLevel *= (1 + delta / this._scalingFactor);
-    this._pinchZoomLevel = Browser._browserView.clampZoomLevel(this._pinchZoomLevel);
-    this._pinchDelta = 0;
+    this._pinchZoomLevel = Browser.selectedTab.clampZoomLevel(this._pinchZoomLevel);
 
     // get current pinch position to calculate opposite vector for zoom point
     let [pX, pY] =
         Browser.transformClientToBrowser(aEvent.clientX, aEvent.clientY);
 
+    let scale = getBrowser().scale;
+    let scrollX = {}, scrollY = {};
+    getBrowser().getPosition(scrollX, scrollY);
+    pX += (this._pinchScrollX - scrollX.value) / scale;
+    pY += (this._pinchScrollY - scrollY.value) / scale;
+
     // redraw zoom canvas according to new zoom rect
-    let rect = Browser._getZoomRectForPoint(2 * this._pinchStartX - pX,
-                                            2 * this._pinchStartY - pY,
+    let rect = Browser._getZoomRectForPoint(this._centerX + this._pinchStartX - pX,
+                                            this._centerY + this._pinchStartY - pY,
                                             this._pinchZoomLevel);
     this._pinchZoom.updateTo(rect);
   },
