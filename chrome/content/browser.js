@@ -57,6 +57,9 @@ function getBrowser() {
 }
 
 const kDefaultBrowserWidth = 980;
+const kBrowserFormZoomLevelMin = 1.0;
+const kBrowserFormZoomLevelMax = 2.0;
+const kBrowserViewZoomLevelPrecision = 10000;
 
 // Override sizeToContent in the main window. It breaks things (bug 565887)
 window.sizeToContent = function() {
@@ -70,255 +73,64 @@ XPCOMUtils.defineLazyServiceGetter(this, "CrashReporter",
 
 const endl = '\n';
 
-function debug() {
-  let bv = Browser._browserView;
-  let tc = bv._tileManager._tileCache;
-  let scrollbox = document.getElementById("content-scrollbox")
-                .boxObject.QueryInterface(Ci.nsIScrollBoxObject);
-
-  let x = {};
-  let y = {};
-  let w = {};
-  let h = {};
-  scrollbox.getPosition(x, y);
-  scrollbox.getScrolledSize(w, h);
-  let container = document.getElementById("tile-container");
-  let [x, y] = [x.value, y.value];
-  let [w, h] = [w.value, h.value];
-  if (bv) {
-    dump('----------------------DEBUG!-------------------------\n');
-    dump(bv._browserViewportState.toString() + endl);
-
-    dump(endl);
-
-    dump('location from Browser: ' + Browser.selectedBrowser.currentURI.spec + endl);
-    dump('location from BV     : ' + bv.getBrowser().currentURI.spec + endl);
-
-    dump(endl + endl);
-
-    let cr = bv._tileManager._criticalRect;
-    dump('criticalRect from BV: ' + (cr ? cr.toString() : null) + endl);
-    dump('visibleRect from BV : ' + bv.getVisibleRect().toString() + endl);
-    dump('visibleRect from foo: ' + Browser.getVisibleRect().toString() + endl);
-
-    dump('bv batchops depth:    ' + bv._batchOps.length + endl);
-    dump('renderpause depth:    ' + bv._renderMode + endl);
-
-    dump(endl);
-
-    dump('window.innerWidth : ' + window.innerWidth  + endl);
-    dump('window.innerHeight: ' + window.innerHeight + endl);
-
-    dump(endl);
-
-    dump('container width,height from BV: ' + bv._container.style.width + ', '
-                                            + bv._container.style.height + endl);
-    dump('container width,height via DOM: ' + container.style.width + ', '
-                                            + container.style.height + endl);
-
-    dump(endl);
-
-    dump('scrollbox position    : ' + x + ', ' + y + endl);
-    dump('scrollbox scrolledsize: ' + w + ', ' + h + endl);
-
-
-    let sb = document.getElementById("content-scrollbox");
-    dump('container location:     ' + Math.round(container.getBoundingClientRect().left) + " " +
-                                      Math.round(container.getBoundingClientRect().top) + endl);
-
-    dump(endl);
-
-    let mouseModule = ih._modules[0];
-    dump('ih grabber  : ' + ih._grabber           + endl);
-    dump('ih grabdepth: ' + ih._grabDepth         + endl);
-    dump('ih listening: ' + !ih._ignoreEvents     + endl);
-    dump('ih suppress : ' + ih._suppressNextClick + endl);
-    dump('mouseModule : ' + mouseModule           + endl);
-
-    dump(endl);
-
-    dump('tilecache capacity: ' + bv._tileManager._tileCache.getCapacity() + endl);
-    dump('tilecache size    : ' + bv._tileManager._tileCache.size          + endl);
-    dump('tilecache iBound  : ' + bv._tileManager._tileCache.iBound        + endl);
-    dump('tilecache jBound  : ' + bv._tileManager._tileCache.jBound        + endl);
-
-    dump('-----------------------------------------------------\n');
-  }
-}
-
-function debugTile(i, j) {
-  let bv = Browser._browserView;
-  let tc = bv._tileManager._tileCache;
-  let t  = tc.getTile(i, j);
-
-  dump('------ DEBUGGING TILE (' + i + ',' + j + ') --------\n');
-
-  dump('in bounds: ' + tc.inBounds(i, j) + endl);
-  dump('occupied : ' + !!tc.lookup(i, j) + endl);
-  if (t)
-  {
-  dump('toString : ' + t.toString(true) + endl);
-  dump('free     : ' + t.free + endl);
-  dump('dirtyRect: ' + t._dirtyTileCanvasRect + endl);
-
-  let len = tc._tilePool.length;
-  for (let k = 0; k < len; ++k)
-    if (tc._tilePool[k] === t)
-      dump('found in tilePool at index ' + k + endl);
-  }
-
-  dump('------------------------------------\n');
-}
-
 function onDebugKeyPress(ev) {
-  let bv = Browser._browserView;
-
   if (!ev.ctrlKey)
     return;
 
   // use capitals so we require SHIFT here too
 
-  const a = 65;   // debug all critical tiles
-  const b = 66;   // dump an ASCII graphic of the tile map
+  const a = 65;
+  const b = 66;
   const c = 67;
-  const d = 68;  // debug dump
+  const d = 68;
   const e = 69;
-  const f = 70;  // free memory by clearing a tab.
+  const f = 70;  // force GC
   const g = 71;
   const h = 72;
-  const i = 73;  // toggle info click mode
+  const i = 73;
   const j = 74;
   const k = 75;
-  const l = 76;  // restart lazy crawl
-  const m = 77;  // fix mouseout
+  const l = 76;
+  const m = 77;
   const n = 78;
   const o = 79;
-  const p = 80;  // debug tiles in pool order
+  const p = 80;  // fake pinch zoom
   const q = 81;  // toggle orientation
-  const r = 82;  // reset visible rect
+  const r = 82;
   const s = 83;
   const t = 84;
-  const u = 85;  // debug given list of tiles separated by space
+  const u = 85;
   const v = 86;
   const w = 87;
   const x = 88;
   const y = 89;
-  const z = 90;  // set zoom level to 1
-
-  if (window.tileMapMode) {
-    function putChar(ev, col, row) {
-      let tile = tc.getTile(col, row);
-      switch (ev.charCode) {
-      case h: // held tiles
-        dump(tile ? (tile.free ? '*' : 'h') : ' ');
-        break;
-      case d: // dirty tiles
-        dump(tile ? (tile.isDirty() ? 'd' : '*') : ' ');
-        break;
-      case o: // occupied tileholders
-        dump(tc.lookup(col, row) ? 'o' : ' ');
-        break;
-      }
-    }
-
-    let tc = Browser._browserView._tileManager._tileCache;
-    let col, row;
-
-    dump(endl);
-
-    dump('  ');
-    for (col = 0; col < tc.iBound; ++col)
-      dump(col % 10);
-
-    dump(endl);
-
-    for (row = 0; row < tc.jBound; ++row) {
-
-      dump((row % 10) + ' ');
-
-      for (col = 0; col < tc.iBound; ++col) {
-        putChar(ev, col, row);
-      }
-
-      dump(endl);
-    }
-    dump(endl + endl);
-
-    for (let ii = 0; ii < tc._tilePool.length; ++ii) {
-      let tile = tc._tilePool[ii];
-      putChar(ev, tile.i, tile.j);
-    }
-
-    dump(endl + endl);
-
-    window.tileMapMode = false;
-    return;
-  }
+  const z = 90;
 
   switch (ev.charCode) {
   case f:
     MemoryObserver.observe();
     dump("Forced a GC\n");
     break;
-  case r:
-    bv.onAfterVisibleMove();
-    //bv.setVisibleRect(Browser.getVisibleRect());
-
-  case d:
-    debug();
-
-    break;
-  case l:
-    bv._tileManager.restartLazyCrawl(bv._tileManager._criticalRect);
-
-    break;
-  case b:
-    window.tileMapMode = true;
-    break;
-  case u:
-    let ijstrs = window.prompt('row,col plz').split(' ');
-    for each (let ijstr in ijstrs) {
-      let [i, j] = ijstr.split(',').map(function (x) { return parseInt(x); });
-      debugTile(i, j);
-    }
-
-    break;
-  case a:
-    let cr = bv._tileManager._criticalRect;
-    dump('>>>>>> critical rect is ' + (cr ? cr.toString() : cr) + '\n');
-    if (cr) {
-      let starti = cr.left  >> kTileExponentWidth;
-      let endi   = cr.right >> kTileExponentWidth;
-
-      let startj = cr.top    >> kTileExponentHeight;
-      let endj   = cr.bottom >> kTileExponentHeight;
-
-      for (var jj = startj; jj <= endj; ++jj)
-        for (var ii = starti; ii <= endi; ++ii)
-          debugTile(ii, jj);
-    }
-
-    break;
-  case i:
-    window.infoMode = !window.infoMode;
-    break;
-  case m:
-    Util.dumpLn("renderMode:", bv._renderMode);
-    Util.dumpLn("batchOps:",bv._batchOps.length);
-    bv.resumeRendering();
-    break;
-  case p:
-    let tc = bv._tileManager._tileCache;
-    dump('************* TILE POOL ****************\n');
-    for (let ii = 0, len = tc._tilePool.length; ii < len; ++ii) {
-      if (window.infoMode)
-        debugTile(tc._tilePool[ii].i, tc._tilePool[ii].j);
-      else
-        dump(tc._tilePool[ii].i + ',' + tc._tilePool[ii].j + '\n');
-    }
-    dump('****************************************\n');
-    break;
 #ifndef MOZ_PLATFORM_MAEMO
+  case p:
+    function dispatchMagnifyEvent(aName, aDelta) {
+      let e = document.createEvent("SimpleGestureEvent");
+      e.initSimpleGestureEvent("MozMagnifyGesture"+aName, true, true, window, null,
+                               0, 0, 0, 0, false, false, false, false, 0, null, 0, aDelta);
+      document.getElementById("inputhandler-overlay").dispatchEvent(e);
+    }
+    dispatchMagnifyEvent("Start", 0);
+
+    let frame = 0;
+    let timer = new Util.Timeout();
+    timer.interval(100, function() {
+      dispatchMagnifyEvent("Update", 20);
+      if (++frame > 10) {
+        timer.clear();
+        dispatchMagnifyEvent("", frame*20);
+      }
+    });
+    break;
   case q:
     if (Util.isPortrait())
       window.top.resizeTo(800,480);
@@ -326,15 +138,10 @@ function onDebugKeyPress(ev) {
       window.top.resizeTo(480,800);
     break;
 #endif
-  case z:
-    bv.setZoomLevel(1.0);
-    break;
   default:
     break;
   }
 }
-window.infoMode = false;
-window.tileMapMode = false;
 
 var ih = null;
 
@@ -343,8 +150,6 @@ var Browser = {
   _selectedTab : null,
   windowUtils: window.QueryInterface(Ci.nsIInterfaceRequestor)
                      .getInterface(Ci.nsIDOMWindowUtils),
-  contentScrollbox: null,
-  contentScrollboxScroller: null,
   controlsScrollbox: null,
   controlsScrollboxScroller: null,
   pageScrollbox: null,
@@ -363,23 +168,40 @@ var Browser = {
       dump("###########" + e + "\n");
     }
 
-    let container = document.getElementById("tile-container");
-    let bv = this._browserView = new BrowserView(container, Browser.getVisibleRect);
+    let container = document.getElementById("browsers");
+    // XXX change
 
-    /* handles dispatching clicks on tiles into clicks in content or zooms */
-    container.customClicker = new ContentCustomClicker(bv);
-    container.customKeySender = new ContentCustomKeySender(bv);
+    /* handles dispatching clicks on browser into clicks in content or zooms */
+    let inputHandlerOverlay = document.getElementById("inputhandler-overlay");
+    inputHandlerOverlay.customClicker = new ContentCustomClicker();
+    inputHandlerOverlay.customKeySender = new ContentCustomKeySender();
+    inputHandlerOverlay.customDragger = new Browser.MainDragger();
 
-    /* scrolling box that contains tiles */
-    let contentScrollbox = this.contentScrollbox = document.getElementById("content-scrollbox");
-    this.contentScrollboxScroller = contentScrollbox.boxObject.QueryInterface(Ci.nsIScrollBoxObject);
-    contentScrollbox.customDragger = new Browser.MainDragger(bv);
+    // Warning, total hack ahead. All of the real-browser related scrolling code
+    // lies in a pretend scrollbox here. Let's not land this as-is. Maybe it's time
+    // to redo all the dragging code.
+    this.contentScrollbox = container;
+    this.contentScrollboxScroller = {
+      scrollBy: function(x, y) {
+        getBrowser().scrollBy(x, y);
+      },
+
+      scrollTo: function(x, y) {
+        getBrowser().scrollTo(x, y);
+      },
+
+      getPosition: function(scrollX, scrollY) {
+        let { x: x, y: y } = getBrowser().getPosition();
+        scrollX.value = x;
+        scrollY.value = y;
+      }
+    };
 
     /* horizontally scrolling box that holds the sidebars as well as the contentScrollbox */
     let controlsScrollbox = this.controlsScrollbox = document.getElementById("controls-scrollbox");
     this.controlsScrollboxScroller = controlsScrollbox.boxObject.QueryInterface(Ci.nsIScrollBoxObject);
     controlsScrollbox.customDragger = {
-      isDraggable: function isDraggable(target, content) { return false; },
+      isDraggable: function isDraggable(target, content) { return {}; },
       dragStart: function dragStart(cx, cy, target, scroller) {},
       dragStop: function dragStop(dx, dy, scroller) { return false; },
       dragMove: function dragMove(dx, dy, scroller) { return false; }
@@ -389,9 +211,6 @@ var Browser = {
     let pageScrollbox = this.pageScrollbox = document.getElementById("page-scrollbox");
     this.pageScrollboxScroller = pageScrollbox.boxObject.QueryInterface(Ci.nsIScrollBoxObject);
     pageScrollbox.customDragger = controlsScrollbox.customDragger;
-
-    // during startup a lot of viewportHandler calls happen due to content and window resizes
-    bv.beginBatchOperation();
 
     let stylesheet = document.styleSheets[0];
     for each (let style in ["viewport-width", "viewport-height", "window-width", "window-height", "toolbar-height"]) {
@@ -410,15 +229,11 @@ var Browser = {
       if (maximize && w > screen.width)
         return;
 
-      bv.beginBatchOperation();
-
       let toolbarHeight = Math.round(document.getElementById("toolbar-main").getBoundingClientRect().height);
       let scaledDefaultH = (kDefaultBrowserWidth * (h / w));
       let scaledScreenH = (window.screen.width * (h / w));
       let dpiScale = Services.prefs.getIntPref("zoom.dpiScale") / 100;
 
-      Browser.styles["viewport-width"].width = (w / dpiScale) + "px";
-      Browser.styles["viewport-height"].height = (h / dpiScale) + "px";
       Browser.styles["window-width"].width = w + "px";
       Browser.styles["window-height"].height = h + "px";
       Browser.styles["toolbar-height"].height = toolbarHeight + "px";
@@ -426,32 +241,15 @@ var Browser = {
       // Tell the UI to resize the browser controls
       BrowserUI.sizeControls(w, h);
 
-      // XXX During the launch, the resize of the window arrive after we add
-      // the first tab, so we need to force the viewport state for this case
-      // see bug 558840
-      let bvs = bv._browserViewportState;
-      if (bvs.viewportRect.width == 1 && bvs.viewportRect.height == 1) {
-        bvs.viewportRect.width = window.innerWidth;
-        bvs.viewportRect.height = window.innerHeight;
-      }
-
-      bv.updateDefaultZoom();
-      if (bv.isDefaultZoom())
-        // XXX this should really only happen on browser startup, not every resize
-        Browser.hideSidebars();
-      bv.onAfterVisibleMove();
+      // XXX this should really only happen on browser startup, not every resize
+      Browser.hideSidebars();
 
       for (let i = Browser.tabs.length - 1; i >= 0; i--)
         Browser.tabs[i].updateViewportSize();
 
-      bv.commitBatchOperation();
-
       let curEl = document.activeElement;
       if (curEl && curEl.scrollIntoView)
         curEl.scrollIntoView(false);
-
-      // Preload the zoom snapshot canvas, because it's slow on Android (bug 586353)
-      AnimatedZoom.createCanvas().MozGetIPCContext("2d");
     }
     window.addEventListener("resize", resizeHandler, false);
 
@@ -466,7 +264,6 @@ var Browser = {
     function notificationHandler() {
       // Let the view know that the layout might have changed
       Browser.forceChromeReflow();
-      bv.onAfterVisibleMove();
     }
     let notifications = document.getElementById("notifications");
     notifications.addEventListener("AlertActive", notificationHandler, false);
@@ -475,7 +272,7 @@ var Browser = {
     BrowserUI.init();
 
     // initialize input handling
-    ih = new InputHandler(container);
+    ih = new InputHandler(inputHandlerOverlay);
 
     window.controllers.appendController(this);
     window.controllers.appendController(BrowserUI);
@@ -517,8 +314,6 @@ var Browser = {
       button.hidden = false;
     }
 
-    bv.commitBatchOperation();
-
     // If some add-ons were disabled during during an application update, alert user
     if (Services.prefs.prefHasUserValue("extensions.disabledAddons")) {
       let addons = Services.prefs.getCharPref("extensions.disabledAddons").split(",");
@@ -557,7 +352,7 @@ var Browser = {
       let shouldPrompt = Services.prefs.getBoolPref("browser.tabs.warnOnClose");
       if (shouldPrompt) {
         let prompt = Services.prompt;
-  
+
         // Default to true: if it were false, we wouldn't get this far
         let warnOnClose = { value: true };
 
@@ -601,13 +396,12 @@ var Browser = {
     Services.obs.notifyObservers(closingCanceled, "browser-lastwindow-close-requested", null);
     if (closingCanceled.data)
       return false;
-  
+
     Services.obs.notifyObservers(null, "browser-lastwindow-close-granted", null);
     return true;
   },
 
   shutdown: function shutdown() {
-    this._browserView.uninit();
     BrowserUI.uninit();
 
     var os = Services.obs;
@@ -636,53 +430,25 @@ var Browser = {
   scrollContentToTop: function scrollContentToTop() {
     this.contentScrollboxScroller.scrollTo(0, 0);
     this.pageScrollboxScroller.scrollTo(0, 0);
-    this._browserView.onAfterVisibleMove();
   },
-
+  
   // cmd_scrollBottom does not work in Fennec (Bug 590535).
-  scrollContentToBottom: function scrollContentToTop() {
-    let x = {}, y = {};
-    this.contentScrollboxScroller.getScrolledSize(x, y);
-    this.contentScrollboxScroller.scrollTo(0, y.value);
-
-    this.pageScrollboxScroller.getScrolledSize(x, y);
-    this.pageScrollboxScroller.scrollTo(0, y.value);
-
-    this._browserView.onAfterVisibleMove();
-  },
-
-  /** Let current browser's scrollbox know about where content has been panned. */
-  scrollBrowserToContent: function scrollBrowserToContent() {
-    let browser = this.selectedBrowser;
-    if (browser) {
-      let scroll = Browser.getScrollboxPosition(Browser.contentScrollboxScroller);
-      browser.messageManager.sendAsyncMessage("Content:ScrollTo", { x: scroll.x, y: scroll.y });
-    }
-  },
-
-  /** Update viewport to location of browser's scrollbars. */
-  scrollContentToBrowser: function scrollContentToBrowser(aScrollX, aScrollY) {
-    if (aScrollY != 0)
-      Browser.hideTitlebar();
-
-    let zoomLevel = this._browserView.getZoomLevel();
-    Browser.contentScrollboxScroller.scrollTo(aScrollX*zoomLevel, aScrollY*zoomLevel);
-    this._browserView.onAfterVisibleMove();
+  scrollContentToBottom: function scrollContentToBottom() {
+    this.contentScrollboxScroller.scrollTo(0, Number.MAX_VALUE);
+    this.pageScrollboxScroller.scrollTo(0, Number.MAX_VALUE);
   },
 
   hideSidebars: function scrollSidebarsOffscreen() {
-    let container = this.contentScrollbox;
+    let container = document.getElementById("browsers");
     let rect = container.getBoundingClientRect();
     this.controlsScrollboxScroller.scrollBy(Math.round(rect.left), 0);
-    this._browserView.onAfterVisibleMove();
   },
 
   hideTitlebar: function hideTitlebar() {
-    let container = this.contentScrollbox;
+    let container = document.getElementById("browsers");
     let rect = container.getBoundingClientRect();
     this.pageScrollboxScroller.scrollBy(0, Math.round(rect.top));
     this.tryUnfloatToolbar();
-    this._browserView.onAfterVisibleMove();
   },
 
   /**
@@ -805,8 +571,6 @@ var Browser = {
   },
 
   set selectedTab(tab) {
-    let bv = this._browserView;
-
     if (tab instanceof XULElement)
       tab = this.getTabFromChrome(tab);
 
@@ -814,7 +578,6 @@ var Browser = {
       return;
 
     if (this._selectedTab) {
-      this._selectedTab.contentScrollOffset = this.getScrollboxPosition(this.contentScrollboxScroller);
       this._selectedTab.pageScrollOffset = this.getScrollboxPosition(this.pageScrollboxScroller);
 
       // Make sure we leave the toolbar in an unlocked state
@@ -824,17 +587,26 @@ var Browser = {
 
     let isFirstTab = this._selectedTab == null;
     let lastTab = this._selectedTab;
+    let oldBrowser = lastTab ? lastTab._browser : null;
+    let browser = tab.browser;
+
     this._selectedTab = tab;
 
     // Lock the toolbar if the new tab is still loading
     if (this._selectedTab.isLoading())
       BrowserUI.lockToolbar();
 
-    bv.beginBatchOperation();
+    if (oldBrowser) {
+      oldBrowser.setAttribute("type", "content");
+      oldBrowser.style.display = "none";
+      oldBrowser.messageManager.sendAsyncMessage("Browser:Blur", {});
+    }
 
-    bv.setBrowser(tab.browser, tab.browserViewportState);
-    bv.forceContainerResize();
-    bv.updateDefaultZoom();
+    if (browser) {
+      browser.setAttribute("type", "content-primary");
+      browser.style.display = "";
+      browser.messageManager.sendAsyncMessage("Browser:Focus", {});
+    }
 
     document.getElementById("tabs").selectedTab = tab.chromeTab;
 
@@ -851,19 +623,10 @@ var Browser = {
 
     tab.lastSelected = Date.now();
 
-    // XXX incorrect behavior if page was scrolled by tab in the background.
-    if (tab.contentScrollOffset) {
-      let { x: scrollX, y: scrollY } = tab.contentScrollOffset;
-      Browser.contentScrollboxScroller.scrollTo(scrollX, scrollY);
-    }
     if (tab.pageScrollOffset) {
       let { x: pageScrollX, y: pageScrollY } = tab.pageScrollOffset;
       Browser.pageScrollboxScroller.scrollTo(pageScrollX, pageScrollY);
     }
-
-    bv.setAggressive(!tab._loading);
-
-    bv.commitBatchOperation();
   },
 
   supportsCommand: function(cmd) {
@@ -990,8 +753,8 @@ var Browser = {
       [rightSidebar, leftSidebar] = [leftSidebar, rightSidebar]; // switch in RTL case
 
     let visibleRect = new Rect(0, 0, window.innerWidth, 1);
-    let leftRect = new Rect(Math.round(leftSidebar.left) - dx, 0, Math.round(leftSidebar.width), 1);
-    let rightRect = new Rect(Math.round(rightSidebar.left) - dx, 0, Math.round(rightSidebar.width), 1);
+    let leftRect = new Rect(Math.round(leftSidebar.left) - Math.round(dx), 0, Math.round(leftSidebar.width), 1);
+    let rightRect = new Rect(Math.round(rightSidebar.left) - Math.round(dx), 0, Math.round(rightSidebar.width), 1);
 
     let leftTotalWidth = leftRect.width;
     let leftVisibility = visibility(leftRect, visibleRect);
@@ -1066,31 +829,31 @@ var Browser = {
 
   /** Zoom one step in (negative) or out (positive). */
   zoom: function zoom(aDirection) {
-    let bv = this._browserView;
-    if (!bv.allowZoom)
+    let tab = this.selectedTab;
+    if (!tab.allowZoom)
       return;
 
-    let zoomLevel = bv.getZoomLevel();
+    let oldZoomLevel = tab.browser.scale;
+    let zoomLevel = oldZoomLevel;
 
     let zoomValues = ZoomManager.zoomValues;
     let i = zoomValues.indexOf(ZoomManager.snap(zoomLevel)) + (aDirection < 0 ? 1 : -1);
     if (i >= 0 && i < zoomValues.length)
       zoomLevel = zoomValues[i];
 
-    zoomLevel = bv.clampZoomLevel(zoomLevel);
+    zoomLevel = tab.clampZoomLevel(zoomLevel);
 
-    let center = this.getVisibleRect().center().map(bv.viewportToBrowser);
-    this.animatedZoomTo(this._getZoomRectForPoint(center.x, center.y, zoomLevel));
+    let [centerX, centerY] = this.transformClientToBrowser(window.innerWidth / 2,
+                                                           window.innerHeight / 2);
+
+    let rect = this._getZoomRectForPoint(centerX, centerY, zoomLevel);
+    this.animatedZoomTo(rect);
   },
 
   /** Rect should be in browser coordinates. */
   _getZoomLevelForRect: function _getZoomLevelForRect(rect) {
     const margin = 15;
-
-    let bv = this._browserView;
-    let vis = bv.getVisibleRect();
-
-    return bv.clampZoomLevel(vis.width / (rect.width + margin * 2));
+    return this.selectedTab.clampZoomLevel(window.innerWidth / (rect.width + margin * 2));
   },
 
   /**
@@ -1098,15 +861,14 @@ var Browser = {
    * @return Rect in viewport coordinates
    * */
   _getZoomRectForRect: function _getZoomRectForRect(rect, y) {
-    let bv = this._browserView;
-    let oldZoomLevel = bv.getZoomLevel();
+    let oldZoomLevel = getBrowser().scale;
     let zoomLevel = this._getZoomLevelForRect(rect);
     let zoomRatio = oldZoomLevel / zoomLevel;
 
     // Don't zoom in a marginal amount, but be more lenient for the first zoom.
     // > 2/3 means operation increases the zoom level by less than 1.5
     // > 9/10 means operation increases the zoom level by less than 1.1
-    let zoomTolerance = (bv.isDefaultZoom()) ? .9 : .6666;
+    let zoomTolerance = (this.selectedTab.isDefaultZoomLevel()) ? .9 : .6666;
     if (zoomRatio >= zoomTolerance)
       return null;
     else
@@ -1118,74 +880,47 @@ var Browser = {
    * @return Rect in viewport coordinates
    */
   _getZoomRectForPoint: function _getZoomRectForPoint(x, y, zoomLevel) {
-    let bv = this._browserView;
-    let vis = bv.getVisibleRect();
-    x = bv.browserToViewport(x);
-    y = bv.browserToViewport(y);
+    x = x * getBrowser().scale;
+    y = y * getBrowser().scale;
 
     zoomLevel = Math.min(ZoomManager.MAX, zoomLevel);
-    let zoomRatio = zoomLevel / bv.getZoomLevel();
-    let newVisW = vis.width / zoomRatio, newVisH = vis.height / zoomRatio;
+    let zoomRatio = zoomLevel / getBrowser().scale;
+    let newVisW = window.innerWidth / zoomRatio, newVisH = window.innerHeight / zoomRatio;
     let result = new Rect(x - newVisW / 2, y - newVisH / 2, newVisW, newVisH);
 
     // Make sure rectangle doesn't poke out of viewport
-    return result.translateInside(bv._browserViewportState.viewportRect);
+    return result.translateInside(new Rect(0, 0, getBrowser().contentDocumentWidth, getBrowser().contentDocumentHeight));
   },
 
   animatedZoomTo: function animatedZoomTo(rect) {
-    let zoom = new AnimatedZoom(this._browserView);
-    zoom.animateTo(rect);
+    AnimatedZoom.animateTo(rect);
   },
 
   setVisibleRect: function setVisibleRect(rect) {
-    let bv = this._browserView;
-    let vis = bv.getVisibleRect();
-    let zoomRatio = vis.width / rect.width;
-    let zoomLevel = bv.getZoomLevel() * zoomRatio;
+    let browser = getBrowser();
+    let zoomRatio = window.innerWidth / rect.width;
+    let zoomLevel = browser.scale * zoomRatio;
     let scrollX = rect.left * zoomRatio;
     let scrollY = rect.top * zoomRatio;
 
-    // The order of operations below is important for artifacting and for performance. Important
-    // side effects of functions are noted below.
-
-    // Hardware scrolling happens immediately when scrollTo is called.  Hide to prevent artifacts.
-    bv.beginOffscreenOperation(rect);
-
-    // We must scroll to the correct area before TileManager is informed of the change
-    // so that only one render is done. Ensures setZoomLevel puts it off.
-    bv.beginBatchOperation();
-
-    // Critical rect changes when controls are hidden. Must hide before tilemanager viewport.
     this.hideSidebars();
     this.hideTitlebar();
 
-    bv.setZoomLevel(zoomLevel);
-
-    // Ensure container is big enough for scroll values.
-    bv.forceContainerResize();
-    this.forceChromeReflow();
-    this.contentScrollboxScroller.scrollTo(scrollX, scrollY);
-    bv.onAfterVisibleMove();
-
-    // Inform tile manager, which happens to render new tiles too. Must call in case a batch
-    // operation was in progress before zoom.
-    bv.forceViewportChange();
-
-    bv.commitBatchOperation();
-    bv.commitOffscreenOperation();
+    browser.scale = this.selectedTab.clampZoomLevel(zoomLevel);
+    browser.scrollTo(scrollX, scrollY);
   },
 
   zoomToPoint: function zoomToPoint(cX, cY, aRect) {
-    let bv = this._browserView;
-    if (!bv.allowZoom)
+    let tab = this.selectedTab;
+    if (!tab.allowZoom)
       return null;
 
     let zoomRect = null;
     if (aRect)
       zoomRect = this._getZoomRectForRect(aRect, cY);
 
-    if (!zoomRect && bv.isDefaultZoom())
-      zoomRect = this._getZoomRectForPoint(cX, cY, bv.getZoomLevel() * 2);
+    if (!zoomRect && tab.isDefaultZoomLevel())
+      zoomRect = this._getZoomRectForPoint(cX, cY, getBrowser().scale * 2);
 
     if (zoomRect)
       this.animatedZoomTo(zoomRect);
@@ -1194,9 +929,9 @@ var Browser = {
   },
 
   zoomFromPoint: function zoomFromPoint(cX, cY) {
-    let bv = this._browserView;
-    if (bv.allowZoom && !bv.isDefaultZoom()) {
-      let zoomLevel = bv.getDefaultZoomLevel();
+    let tab = this.selectedTab;
+    if (tab.allowZoom && !tab.isDefaultZoomLevel()) {
+      let zoomLevel = tab.getDefaultZoomLevel();
       let zoomRect = this._getZoomRectForPoint(cX, cY, zoomLevel);
       this.animatedZoomTo(zoomRect);
     }
@@ -1206,7 +941,7 @@ var Browser = {
    * Transform x and y from client coordinates to BrowserView coordinates.
    */
   clientToBrowserView: function clientToBrowserView(x, y) {
-    let container = document.getElementById("tile-container");
+    let container = document.getElementById("browsers");
     let containerBCR = container.getBoundingClientRect();
 
     let x0 = Math.round(containerBCR.left);
@@ -1214,11 +949,12 @@ var Browser = {
     if (arguments.length > 1)
       y0 = Math.round(containerBCR.top);
 
-    return (arguments.length > 1) ? [x - x0, y - y0] : (x - x0);
+    let scroll = getBrowser().getPosition();
+    return (arguments.length > 1) ? [x - x0 + scroll.x, y - y0 + scroll.y] : (x - x0 + scroll.x);
   },
 
   browserViewToClient: function browserViewToClient(x, y) {
-    let container = document.getElementById("tile-container");
+    let container = document.getElementById("browsers");
     let containerBCR = container.getBoundingClientRect();
 
     let x0 = Math.round(-containerBCR.left);
@@ -1230,7 +966,7 @@ var Browser = {
   },
 
   browserViewToClientRect: function browserViewToClientRect(rect) {
-    let container = document.getElementById("tile-container");
+    let container = document.getElementById("browsers");
     let containerBCR = container.getBoundingClientRect();
     return rect.clone().translate(Math.round(containerBCR.left), Math.round(containerBCR.top));
   },
@@ -1240,24 +976,7 @@ var Browser = {
    * zoom and page position)
    */
   transformClientToBrowser: function transformClientToBrowser(cX, cY) {
-    return this.clientToBrowserView(cX, cY).map(this._browserView.viewportToBrowser);
-  },
-
-  /**
-   * Return the visible rect in coordinates with origin at the (left, top) of
-   * the tile container, i.e. BrowserView coordinates.
-   */
-  getVisibleRect: function getVisibleRect() {
-    let stack = document.getElementById("tile-stack");
-    let container = document.getElementById("tile-container");
-    let containerBCR = container.getBoundingClientRect();
-
-    let x = Math.round(-containerBCR.left);
-    let y = Math.round(-containerBCR.top);
-    let w = window.innerWidth;
-    let h = stack.getBoundingClientRect().height;
-
-    return new Rect(x, y, w, h);
+    return this.clientToBrowserView(cX, cY).map(function(val) { return val / getBrowser().scale });
   },
 
   /**
@@ -1313,35 +1032,24 @@ var Browser = {
 };
 
 
-Browser.MainDragger = function MainDragger(browserView) {
-  this.bv = browserView;
+Browser.MainDragger = function MainDragger() {
 };
 
 Browser.MainDragger.prototype = {
-  isDraggable: function isDraggable(target, scroller) { return true; },
+  isDraggable: function isDraggable(target, scroller) {
+    return { x: true, y: true };
+  },
 
   dragStart: function dragStart(clientX, clientY, target, scroller) {
-    this._nextRender = Date.now() + 500;
-    this._dragMoved = false;
   },
 
   dragStop: function dragStop(dx, dy, scroller) {
-    this.draggedFrame = null;
     this.dragMove(Browser.snapSidebars(), 0, scroller);
-
     Browser.tryUnfloatToolbar();
-
-    if (this._dragMoved)
-      this.bv.resumeRendering();
   },
 
   dragMove: function dragMove(dx, dy, scroller) {
     let doffset = new Point(dx, dy);
-
-    if (!this._dragMoved) {
-      this._dragMoved = true;
-      this.bv.pauseRendering();
-    }
 
     // First calculate any panning to take sidebars out of view
     let panOffset = this._panControlsAwayOffset(doffset);
@@ -1355,13 +1063,6 @@ Browser.MainDragger.prototype = {
     Browser.tryFloatToolbar(doffset.x, 0);
     this._panScroller(Browser.controlsScrollboxScroller, doffset);
     this._panScroller(Browser.pageScrollboxScroller, doffset);
-
-    this.bv.onAfterVisibleMove();
-
-    if (Date.now() >= this._nextRender) {
-      this.bv.renderNow();
-      this._nextRender = Date.now() + 500;
-    }
 
     return !doffset.equals(dx, dy);
   },
@@ -1546,8 +1247,7 @@ const BrowserSearch = {
 
 
 /** Watches for mouse events in chrome and sends them to content. */
-function ContentCustomClicker(browserView) {
-  this._browserView = browserView;
+function ContentCustomClicker() {
 }
 
 ContentCustomClicker.prototype = {
@@ -1555,18 +1255,20 @@ ContentCustomClicker.prototype = {
     let aX = aX || 0;
     let aY = aY || 0;
     let aModifiers = aModifiers || null;
-    let browser = this._browserView.getBrowser();
+    let browser = getBrowser();
     let [x, y] = Browser.transformClientToBrowser(aX, aY);
     browser.messageManager.sendAsyncMessage(aName, { x: x, y: y, modifiers: aModifiers });
   },
 
   mouseDown: function mouseDown(aX, aY) {
     // Ensure that the content process has gets an activate event
-    let browser = this._browserView.getBrowser();
+    let browser = getBrowser();
     let fl = browser.QueryInterface(Ci.nsIFrameLoaderOwner).frameLoader;
+    browser.focus();
     try {
       fl.activateRemoteFrame();
-    } catch (e) {}
+    } catch (e) {
+    }
     this._dispatchMouseEvent("Browser:MouseDown", aX, aY);
   },
 
@@ -1595,7 +1297,7 @@ ContentCustomClicker.prototype = {
 
     const kDoubleClickRadius = 100;
 
-    let maxRadius = kDoubleClickRadius * Browser._browserView.getZoomLevel();
+    let maxRadius = kDoubleClickRadius * getBrowser().scale;
     let dx = aX2 - aX1;
     let dy = aY1 - aY2;
 
@@ -1610,14 +1312,13 @@ ContentCustomClicker.prototype = {
 
 
 /** Watches for mouse events in chrome and sends them to content. */
-function ContentCustomKeySender(browserView) {
-  this._browserView = browserView;
+function ContentCustomKeySender() {
 }
 
 ContentCustomKeySender.prototype = {
   /** Dispatch a mouse event with chrome client coordinates. */
   dispatchKeyEvent: function _dispatchKeyEvent(aEvent) {
-    let browser = this._browserView.getBrowser();
+    let browser = getBrowser();
     if (browser) {
       browser.messageManager.sendAsyncMessage("Browser:KeyEvent", {
         type: aEvent.type,
@@ -2380,25 +2081,9 @@ ProgressController.prototype = {
   },
 
   _documentStop: function _documentStop() {
-    if (this._tab == Browser.selectedTab) {
-      // XXX Sometimes MozScrolledAreaChanged has not occurred, so the scroll pane will not
-      // be resized yet. We are assuming this event is on the queue, so scroll the pane
-      // "soon."
-      Util.executeSoon(function() {
-        let scroll = Browser.getScrollboxPosition(Browser.contentScrollboxScroller);
-        if (scroll.isZero())
-          Browser.scrollContentToBrowser(0, 0);
-      });
-    }
-    else {
-      // XXX: We don't know the current scroll position of the content, so assume
-      // it's at the top. This will be fixed by Layers
-      this._tab.contentScrollOffset = new Point(0, 0);
-
       // Make sure the URLbar is in view. If this were the selected tab,
       // onLocationChange would scroll to top.
       this._tab.pageScrollOffset = new Point(0, 0);
-    }
   }
 };
 
@@ -2491,7 +2176,6 @@ var OfflineApps = {
 function Tab(aURI, aParams) {
   this._id = null;
   this._browser = null;
-  this._browserViewportState = null;
   this._state = null;
   this._listener = null;
   this._loading = false;
@@ -2512,10 +2196,6 @@ Tab.prototype = {
     return this._browser;
   },
 
-  get browserViewportState() {
-    return this._browserViewportState;
-  },
-
   get chromeTab() {
     return this._chromeTab;
   },
@@ -2526,23 +2206,7 @@ Tab.prototype = {
     if (!browser)
       return;
 
-    this._browserViewportState.metaData = metaData;
-
-    // Remove any previous styles.
-    browser.className = "";
-    browser.style.removeProperty("width");
-    browser.style.removeProperty("height");
-
-    // Add classes for auto-sizing viewports.
-    if (metaData.autoSize) {
-      if (metaData.defaultZoom == 1.0) {
-        browser.classList.add("window-width");
-        browser.classList.add("window-height");
-      } else {
-        browser.classList.add("viewport-width");
-        browser.classList.add("viewport-height");
-      }
-    }
+    this.metaData = metaData;
     this.updateViewportSize();
   },
 
@@ -2552,7 +2216,7 @@ Tab.prototype = {
     if (!browser)
       return;
 
-    let metaData = this._browserViewportState.metaData || {};
+    let metaData = this.metaData || {};
     if (!metaData.autoSize) {
       let screenW = window.innerWidth;
       let screenH = window.innerHeight;
@@ -2576,16 +2240,19 @@ Tab.prototype = {
         viewportH = kDefaultBrowserWidth * (screenH / screenW);
       }
 
-      browser.style.width = viewportW + "px";
-      browser.style.height = viewportH + "px";
+      browser.setWindowSize(viewportW, viewportH);
     }
+    else {
+      let browserBCR = browser.getBoundingClientRect();
+      let w = browserBCR.width;
+      let h = browserBCR.height;
+      if (metaData.defaultZoom != 1.0) {
+        let dpiScale = Services.prefs.getIntPref("zoom.dpiScale") / 100;
+        w /= dpiScale;
+        h /= dpiScale;
+      }
 
-    // Local XUL documents are not firing MozScrolledAreaChanged
-    let contentDocument = browser.contentDocument;
-    if (contentDocument && contentDocument instanceof XULDocument) {
-      let width = contentDocument.documentElement.scrollWidth;
-      let height = contentDocument.documentElement.scrollHeight;
-      BrowserView.Util.ensureMozScrolledAreaEvent(browser, width, height);
+      browser.setWindowSize(w, h);
     }
   },
 
@@ -2593,27 +2260,11 @@ Tab.prototype = {
     if (this._loading) throw "Already Loading!";
 
     this._loading = true;
-
-    let bv = Browser._browserView;
-
-    if (this == Browser.selectedTab) {
-      bv.setAggressive(false);
-      // Sync up browser so previous and forward scroll positions are set. This is a good time to do
-      // this because the resulting invalidation is irrelevant.
-      bv.ignorePageScroll(true);
-      Browser.scrollBrowserToContent();
-    }
   },
 
   endLoading: function endLoading() {
     if (!this._loading) throw "Not Loading!";
     this._loading = false;
-
-    if (this == Browser.selectedTab) {
-      let bv = Browser._browserView;
-      bv.ignorePageScroll(false);
-      bv.setAggressive(true);
-    }
   },
 
   isLoading: function isLoading() {
@@ -2621,9 +2272,6 @@ Tab.prototype = {
   },
 
   create: function create(aURI, aParams) {
-    // Initialize a viewport state for BrowserView
-    this._browserViewportState = BrowserView.Util.createBrowserViewportState();
-
     this._chromeTab = document.getElementById("tabs").addTab();
     let browser = this._createBrowser(aURI);
 
@@ -2651,9 +2299,9 @@ Tab.prototype = {
 
     // Create the browser using the current width the dynamically size the height
     let browser = this._browser = document.createElement("browser");
+    browser.setAttribute("class", "window-width window-height");
     this._chromeTab.linkedBrowser = browser;
 
-    browser.setAttribute("style", "overflow: -moz-hidden-unscrollable; visibility: hidden;");
     browser.setAttribute("type", "content");
 
     let useRemote = Services.prefs.getBoolPref("browser.tabs.remote");
@@ -2666,7 +2314,13 @@ Tab.prototype = {
     // stop about:blank from loading
     browser.stop();
 
-    return browser;
+
+    let self = this;
+    browser.messageManager.addMessageListener("MozScrolledAreaChanged", function() {
+      self.updateDefaultZoomLevel();
+    });
+
+   return browser;
   },
 
   _destroyBrowser: function _destroyBrowser() {
@@ -2684,13 +2338,66 @@ Tab.prototype = {
     }
   },
 
-  /* Set up the initial zoom level. While the bvs.defaultZoomLevel of a tab is
-     equal to bvs.zoomLevel this mean that not user action has happended and
-     we can safely alter the zoom on a window resize or on a page load
-  */
+  clampZoomLevel: function clampZoomLevel(zl) {
+    let browser = this._browser;
+    let bounded = Math.min(Math.max(ZoomManager.MIN, zl), ZoomManager.MAX);
+
+    let md = this.metaData;
+    if (md && md.minZoom)
+      bounded = Math.max(bounded, md.minZoom);
+    if (md && md.maxZoom)
+      bounded = Math.min(bounded, md.maxZoom);
+
+    bounded = Math.max(bounded, this.getPageZoomLevel());
+
+    let rounded = Math.round(bounded * kBrowserViewZoomLevelPrecision) / kBrowserViewZoomLevelPrecision;
+    return rounded || 1.0;
+  },
+
+  /** Record the initial zoom level when a page first loads. */
   resetZoomLevel: function resetZoomLevel() {
-    let bvs = this._browserViewportState;
-    bvs.defaultZoomLevel = bvs.zoomLevel;
+    this._defaultZoomLevel = this._browser.scale;
+  },
+
+  /**
+   * Recalculate default zoom level when page size changes, and update zoom
+   * level if we are at default.
+   */
+  updateDefaultZoomLevel: function updateDefaultZoomLevel() {
+    let browser = this._browser;
+    let isDefault = (browser.scale == this._defaultZoomLevel);
+    this._defaultZoomLevel = this.getDefaultZoomLevel();
+    if (isDefault)
+      browser.scale = this._defaultZoomLevel;
+  },
+
+  isDefaultZoomLevel: function isDefaultZoomLevel() {
+    return this._browser.scale == this._defaultZoomLevel;
+  },
+
+  getDefaultZoomLevel: function getDefaultZoomLevel() {
+    let md = this.metaData;
+    if (md && md.defaultZoom)
+      return this.clampZoomLevel(md.defaultZoom);
+
+    let pageZoom = this.getPageZoomLevel();
+
+    // If pageZoom is "almost" 100%, zoom in to exactly 100% (bug 454456).
+    let granularity = Services.prefs.getIntPref("browser.ui.zoom.pageFitGranularity");
+    let threshold = 1 - 1 / granularity;
+    if (threshold < pageZoom && pageZoom < 1)
+      pageZoom = 1;
+
+    return this.clampZoomLevel(pageZoom);
+  },
+
+  getPageZoomLevel: function getPageZoomLevel() {
+    let browserW = this._browser.contentDocumentWidth;
+    return this._browser.getBoundingClientRect().width / browserW;
+  },
+
+  get allowZoom() {
+    return this.metaData.allowZoom;
   },
 
   updateThumbnail: function updateThumbnail() {

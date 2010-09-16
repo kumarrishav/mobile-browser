@@ -342,6 +342,12 @@ let ContentScroll =  {
   init: function() {
     addMessageListener("Content:ScrollTo", this);
     addMessageListener("Content:ScrollBy", this);
+    addMessageListener("Content:SetResolution", this);
+    addMessageListener("Content:SetCacheViewport", this);
+    addMessageListener("Content:SetCssViewportSize", this);
+
+    addEventListener("scroll", this, false);
+    addEventListener("MozScrolledAreaChanged", this, false);
   },
 
   receiveMessage: function(aMessage) {
@@ -350,9 +356,59 @@ let ContentScroll =  {
       case "Content:ScrollTo":
         content.scrollTo(json.x, json.y);
         break;
+
       case "Content:ScrollBy":
         content.scrollBy(json.dx, json.dy);
         break;
+
+      case "Content:SetCacheViewport": {
+        let displayport = new Rect(json.x, json.y, json.w, json.h);
+        if (displayport.isEmpty())
+          break;
+
+        let cwu = Util.getWindowUtils(content);
+        cwu.setResolution(json.scale, json.scale);
+        cwu.setDisplayPort(displayport.x, displayport.y, displayport.width, displayport.height);
+        break;
+      }
+
+      case "Content:SetCssViewportSize": {
+        let cwu = Util.getWindowUtils(content);
+        cwu.setCSSViewport(json.width, json.height);
+        break;
+      }
+    }
+  },
+
+  handleEvent: function(aEvent) {
+    switch (aEvent.type) {
+      case "scroll":
+        Util.dumpLn("XXX stub");
+        break;
+
+      case "MozScrolledAreaChanged": {
+        let doc = aEvent.originalTarget;
+        if (content != doc.defaultView) // We are only interested in root scroll pane changes
+          return;
+
+        // XXX need to make some things in Util as its own module!
+        let scrollOffset = Util.getScrollOffset(content);
+
+        // Adjust width and height from the incoming event properties so that we
+        // ignore changes to width and height contributed by growth in page
+        // quadrants other than x > 0 && y > 0.
+        let x = aEvent.x + scrollOffset.x;
+        let y = aEvent.y + scrollOffset.y;
+        let width = aEvent.width + (x < 0 ? x : 0);
+        let height = aEvent.height + (y < 0 ? y : 0);
+
+        sendAsyncMessage("MozScrolledAreaChanged", {
+          width: width,
+          height: height,
+        });
+
+        break;
+      }
     }
   }
 };
