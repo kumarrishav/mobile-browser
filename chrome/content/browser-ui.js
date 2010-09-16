@@ -1057,12 +1057,15 @@ var TapHighlightHelper = {
   },
 
   show: function show(aRects) {
-    let bv = Browser._browserView;
+    let browser = getBrowser();
+    let scroll = browser.getPosition();
+
     let union = aRects.reduce(function(a, b) {
       return a.expandToContain(b);
-    }, new Rect(0, 0, 0, 0)).map(bv.browserToViewport);
+    }, new Rect(0, 0, 0, 0)).map(function(val) val * browser.scale)
+                            .translate(-scroll.x, -scroll.y);
 
-    let vis = Browser.getVisibleRect();
+    let vis = Rect.fromRect(browser.getBoundingClientRect());
     let canvasArea = vis.intersect(union);
 
     let overlay = this._overlay;
@@ -1074,14 +1077,14 @@ var TapHighlightHelper = {
     let ctx = overlay.getContext("2d");
     ctx.save();
     ctx.translate(-canvasArea.left, -canvasArea.top);
-    bv.browserToViewportCanvasContext(ctx);
+    ctx.scale(browser.scale, browser.scale);
 
     overlay.style.left = canvasArea.left + "px";
     overlay.style.top = canvasArea.top + "px";
     ctx.fillStyle = "rgba(0, 145, 255, .5)";
     for (let i = aRects.length - 1; i >= 0; i--) {
       let rect = aRects[i];
-      ctx.fillRect(rect.left, rect.top, rect.width, rect.height);
+      ctx.fillRect(rect.left - scroll.x / browser.scale, rect.top - scroll.y / browser.scale, rect.width, rect.height);
     }
     ctx.restore();
     overlay.style.display = "block";
@@ -1572,7 +1575,6 @@ var FindHelperUI = {
 
   show: function findHelperShow() {
     BrowserUI.pushPopup(this, this._container);
-    Browser._browserView.ignorePageScroll(true);
     this._container.show(this);
     this.search("");
     this._textbox.focus();
@@ -1580,7 +1582,6 @@ var FindHelperUI = {
 
   hide: function findHelperHide() {
     BrowserUI.popPopup();
-    Browser._browserView.ignorePageScroll(false);
     this._textbox.value = "";
     this._container.hide(this);
   },
@@ -1604,15 +1605,12 @@ var FindHelperUI = {
   },
 
   _zoom: function _findHelperZoom(aElementRect) {
-    let bv = Browser._browserView;
-    let zoomRect = bv.getVisibleRect();
-
     // Zoom to a specified Rect
-    if (aElementRect && bv.allowZoom && Services.prefs.getBoolPref("findhelper.autozoom")) {
+    if (aElementRect && Browser.selectedTab.allowZoom && Services.prefs.getBoolPref("findhelper.autozoom")) {
       let zoomLevel = Browser._getZoomLevelForRect(aElementRect);
       zoomLevel = Math.min(Math.max(kBrowserFormZoomLevelMin, zoomLevel), kBrowserFormZoomLevelMax);
 
-      zoomRect = Browser._getZoomRectForPoint(aElementRect.center().x, aElementRect.y, zoomLevel);
+      let zoomRect = Browser._getZoomRectForPoint(aElementRect.center().x, aElementRect.y, zoomLevel);
       Browser.animatedZoomTo(zoomRect);
     }
   }
@@ -1794,8 +1792,6 @@ var FormHelperUI = {
     if (aVal == this._open)
       return;
 
-    let bv = Browser._browserView;
-    bv.ignorePageScroll(aVal);
     this._container.hidden = !aVal;
     this._container.contentHasChanged();
 
@@ -1881,13 +1877,11 @@ var FormHelperUI = {
 
   /** Zoom and move viewport so that element is legible and touchable. */
   _zoom: function _formHelperZoom(aElementRect, aCaretRect) {
-    let bv = Browser._browserView;
-
+    let browser = getBrowser();
     if (aElementRect && aCaretRect && this._open) {
       this._currentCaretRect = aCaretRect;
 
-      // might not always be set, if not - use the windowsize
-      let visibleScreenArea = !bv._visibleScreenArea.isEmpty() ? bv._visibleScreenArea : new Rect(0, 0, window.innerWidth, window.innerHeight);
+      let visibleScreenArea = new Rect(0, 0, window.innerWidth, window.innerHeight);
 
       // respect the helper container in setting the correct viewAreaHeight
       let viewAreaHeight = visibleScreenArea.height - this._container.getBoundingClientRect().height;
@@ -1936,8 +1930,8 @@ var FormHelperUI = {
         aCaretRect.x = aElementRect.x;
       }
 
-      let zoomLevel = bv.getZoomLevel();
-      let enableZoom = bv.allowZoom && Services.prefs.getBoolPref("formhelper.autozoom");
+      let zoomLevel = browser.scale;
+      let enableZoom = Browser.selectedTab.allowZoom && Services.prefs.getBoolPref("formhelper.autozoom");
       if (enableZoom) {
         zoomLevel = (viewAreaHeight / caretLines) / harmonizedCaretHeight;
         zoomLevel = Math.min(Math.max(kBrowserFormZoomLevelMin, zoomLevel), kBrowserFormZoomLevelMax);
@@ -1954,33 +1948,24 @@ var FormHelperUI = {
                : aCaretRect.x - viewAreaWidth + margin + marginRight;
       // use the adjustet Caret Y minus a margin four our visible rect
       let y = harmonizedCaretY - margin;
+      x *= browser.scale;
+      y *= browser.scale;
+
+      let scroll = browser.getPosition(scrollX, scrollY);
+      let vis = new Rect(scroll.x, scroll.y, window.innerWidth, window.innerHeight);
 
       // from here on play with zoomed values
       // if we want to have it animated, build up zoom rect and animate.
-      if (enableZoom && bv.getZoomLevel() != zoomLevel) {
-        let vis = bv.getVisibleRect();
-        x = bv.browserToViewport(x);
-        y = bv.browserToViewport(y);
-
-        //dont use browser functions they are bogus for this case
-        let zoomRatio = zoomLevel / bv.getZoomLevel();
+      if (enableZoom && browser.scale != zoomLevel) {
+        // don't use browser functions they are bogus for this case
+        let zoomRatio = zoomLevel / browser.scale;
         let newVisW = vis.width / zoomRatio, newVisH = vis.height / zoomRatio;
         let zoomRect = new Rect(x, y, newVisW, newVisH);
 
         Browser.animatedZoomTo(zoomRect);
       }
       else { // no zooming at all
-        let vis = bv.getVisibleRect();
-        // get our x and y in viewport "zoomed" coordinates
-        x = bv.browserToViewport(x);
-        y = bv.browserToViewport(y);
-
-        Browser.contentScrollboxScroller.scrollBy(x-vis.x, y-vis.y);
-
-        // workaround for tilemanager bug, after scrolling one screen height, text gets not painted on typing
-        bv.invalidateEntireView();
-
-        bv.onAfterVisibleMove();
+        browser.scrollBy(x - vis.x, y - vis.y);
       }
     }
   },

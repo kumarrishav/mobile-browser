@@ -218,49 +218,11 @@ function getContentClientRects(aElement) {
 
 /** Reponsible for sending messages about viewport size changes and painting. */
 function Coalescer() {
-  this._pendingDirtyRect = new Rect(0, 0, 0, 0);
-  this._pendingSizeChange = null;
-  this._timer = new Util.Timeout(this);
-
-  // XXX When moving back and forward in docShell history, MozAfterPaint does not get called properly and
-  // some dirty rectangles are never flagged properly.  To fix this, coalescer will fake a paint event that
-  // dirties the entire viewport.
-  this._incremental = false;
 }
 
 Coalescer.prototype = {
-  start: function start() {
-    this._emptyPage();
-    this._timer.interval(1000);
-  },
-
-  stop: function stop() {
-    this._timer.flush();
-  },
-
-  notify: function notify() {
-    this.flush();
-  },
-
   handleEvent: function handleEvent(aEvent) {
     switch (aEvent.type) {
-      case "MozAfterPaint": {
-        let win = aEvent.originalTarget;
-        let scrollOffset = Util.getScrollOffset(win);
-        this.dirty(scrollOffset, aEvent.clientRects);
-        break;
-      }
-      case "MozScrolledAreaChanged": {
-        // XXX if it's possible to get a scroll area change with the same values,
-        // it would be optimal if this didn't send the same message twice.
-        let doc = aEvent.originalTarget;
-        let win = doc.defaultView;
-        let scrollOffset = Util.getScrollOffset(win);
-        if (win.parent != win) // We are only interested in root scroll pane changes
-          return;
-        this.sizeChange(scrollOffset, aEvent.x, aEvent.y, aEvent.width, aEvent.height);
-        break;
-      }
       case "MozApplicationManifest": {
         let doc = aEvent.originalTarget;
         sendAsyncMessage("Browser:MozApplicationManifest", {
@@ -270,74 +232,6 @@ Coalescer.prototype = {
         });
         break;
       }
-      case "scroll":
-        let scroll = Util.getScrollOffset(content);
-        sendAsyncMessage("Browser:PageScroll", { scrollX: scroll.x, scrollY: scroll.y });
-        break;
-    }
-  },
-
-  /** Next scroll size change event will invalidate all previous content. See constructor. */
-  _emptyPage: function _emptyPage() {
-    this._incremental = false;
-  },
-
-  sizeChange: function sizeChange(scrollOffset, x, y, width, height) {
-    // Adjust width and height from the incoming event properties so that we
-    // ignore changes to width and height contributed by growth in page
-    // quadrants other than x > 0 && y > 0.
-    x = x + scrollOffset.x;
-    y = y + scrollOffset.y;
-    this._pendingSizeChange = {
-      width: width + (x < 0 ? x : 0),
-      height: height + (y < 0 ? y : 0)
-    };
-
-    // Clear any pending dirty rectangles since entire viewport will be invalidated
-    // anyways.
-    let rect = this._pendingDirtyRect;
-    rect.top = rect.bottom;
-    rect.left = rect.right;
-
-    if (!this._timer.isPending())
-      this.flush();
-  },
-
-  dirty: function dirty(scrollOffset, clientRects) {
-    if (!this._pendingSizeChange) {
-      let unionRect = this._pendingDirtyRect;
-      for (let i = clientRects.length - 1; i >= 0; i--) {
-        let e = clientRects.item(i);
-        unionRect.expandToContain(new Rect(
-          e.left + scrollOffset.x, e.top + scrollOffset.y, e.width, e.height));
-      }
-
-      if (!this._timer.isPending())
-        this.flush();
-    }
-  },
-
-  flush: function flush() {
-    let dirtyRect = this._pendingDirtyRect;
-    let sizeChange = this._pendingSizeChange;
-    if (sizeChange) {
-      sendAsyncMessage("Browser:MozScrolledAreaChanged", { width: sizeChange.width, height: sizeChange.height });
-      if (!this._incremental)
-        sendAsyncMessage("Browser:MozAfterPaint", { rects: [ { left: 0, top: 0, right: sizeChange.width, bottom: sizeChange.height } ] });
-
-      this._pendingSizeChange = null;
-
-      // After first size change has been issued, assume subsequent size changes are only incremental
-      // changes to the current page.
-      this._incremental = true;
-    }
-    else if (!dirtyRect.isEmpty()) {
-      // No size change has occurred, but areas have been dirtied.
-      sendAsyncMessage("Browser:MozAfterPaint", { rects: [dirtyRect] });
-
-      // Reset the rect to empty
-      dirtyRect.top = dirtyRect.bottom;
-      dirtyRect.left = dirtyRect.right;
     }
   }
 };
@@ -436,10 +330,7 @@ function Content() {
   addMessageListener("Browser:ZoomToPoint", this);
 
   this._coalescer = new Coalescer();
-  addEventListener("MozAfterPaint", this._coalescer, false);
-  addEventListener("MozScrolledAreaChanged", this._coalescer, false);
   addEventListener("MozApplicationManifest", this._coalescer, false);
-  addEventListener("scroll", this._coalescer, false);
 
   this._progressController = new ProgressController(this);
   this._progressController.start();
@@ -458,13 +349,11 @@ Content.prototype = {
 
     switch (aMessage.name) {
       case "Browser:Blur":
-        docShell.isOffScreenBrowser = false;
         docShell.isActive = false;
         this._selected = false;
         break;
 
       case "Browser:Focus":
-        docShell.isOffScreenBrowser = true;
         docShell.isActive = true;
         this._selected = true;
         break;
@@ -615,12 +504,10 @@ Content.prototype = {
     this._contextTimeout.clear();
     this._overlayTimeout.clear();
     this._loading = true;
-    this._coalescer.start();
   },
 
   stopLoading: function stopLoading() {
     this._loading = false;
-    this._coalescer.stop();
   },
 
   isSelected: function isSelected() {
