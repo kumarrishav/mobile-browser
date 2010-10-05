@@ -496,3 +496,6 @@ pref("services.sync.autoconnectDelay", 5);
 // Drag thresholds
 pref("ui.dragThresholdX", 25);
 pref("ui.dragThresholdY", 25);
+
+// Waiting on bug 598864 
+pref("layers.accelerate-all", false);
