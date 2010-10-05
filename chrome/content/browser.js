@@ -2554,7 +2554,7 @@ Tab.prototype = {
 
   getPageZoomLevel: function getPageZoomLevel() {
     let browserW = this._browser.contentDocumentWidth;
-    return this._browser.getBoundingClientRect().width / browserW;
+    return window.innerWidth / browserW;
   },
 
   get allowZoom() {
